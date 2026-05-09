@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Runtime data: never publish real user bookmarks or caches
+data/magpie.sqlite3*
+data/raw/**
+data/cache/**
+data/index/**
+data/exports/**
+!data/raw/x/.gitkeep
+!data/exports/.gitkeep
+!data/normalized/x/bookmarks.sample.jsonl
+
+# Local secrets and environment
+.env
+*.env

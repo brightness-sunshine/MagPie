@@ -1,0 +1,9 @@
+{
+  "storageVersion": 2,
+  "strategy": "sqlite-primary-jsonl-compat",
+  "primaryStore": "data/magpie.sqlite3",
+  "compatStore": "data/normalized/x/bookmarks.jsonl",
+  "rawSnapshots": "data/raw/x/",
+  "exports": "data/exports/",
+  "cli": "scripts/magpie.py"
+}
