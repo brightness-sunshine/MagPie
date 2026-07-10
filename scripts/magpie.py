@@ -61,13 +61,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS bookmarks_fts USING fts5(
 );
 """
 
-GROUP_RULES = {
-    'xr_spatial': ['xr', 'vision pro', 'visionos', 'meta', 'quest', 'ar ', ' vr', 'spatial', 'smart glasses', 'android xr'],
-    'ai_tools': ['ai', 'gpt', 'agent', 'agents', 'model', 'llm', 'automation', 'robot', 'claude', 'openai'],
-    'biology_science': ['biology', 'science', 'flagellum', 'protein', 'cell', 'genome', 'research'],
-    'founder_business': ['founder', 'startup', 'pricing', 'revenue', 'sales', 'market', 'launch'],
-    'uap_unknowns': ['uap', 'ufo', 'grusch', 'non-human', 'biologics', 'craft', 'disclosure'],
-}
+from classify import GROUP_RULES, rule_group  # noqa: E402
 
 
 def now_iso() -> str:
@@ -219,11 +213,7 @@ def cmd_search(args: argparse.Namespace) -> None:
 
 
 def infer_group(row: sqlite3.Row) -> str:
-    hay = ' '.join([row['title'] or '', row['text'] or '', row['url'] or '', row['author_handle'] or '']).lower()
-    for group, needles in GROUP_RULES.items():
-        if any(n in hay for n in needles):
-            return group
-    return 'uncategorized'
+    return rule_group({k: row[k] for k in ('title', 'text', 'url', 'author_handle')})
 
 
 def cmd_groups(args: argparse.Namespace) -> None:
@@ -293,6 +283,50 @@ def cmd_export_markdown(args: argparse.Namespace) -> None:
     print(json.dumps({'output': str(out), 'items': len(rows)}, indent=2))
 
 
+def row_to_item(row: sqlite3.Row) -> dict[str, Any]:
+    """Shape a row the way the Mews shelf generator expects to read it."""
+    return {
+        'id': row['id'],
+        'authorHandle': row['author_handle'],
+        'createdAt': row['created_at'],
+        'text': row['text'],
+        'url': row['url'],
+        'metrics': json.loads(row['metrics_json'] or '{}'),
+    }
+
+
+def cmd_export_json(args: argparse.Namespace) -> None:
+    """Export a selected slice as items[] JSON for `mews generate_shelf --input`."""
+    conn = connect(Path(args.db).expanduser())
+    init_db(conn)
+
+    if args.query:
+        rows = conn.execute(
+            """
+            SELECT b.*
+            FROM bookmarks_fts f
+            JOIN bookmarks b ON b.id = f.id
+            WHERE bookmarks_fts MATCH ?
+            ORDER BY COALESCE(b.created_at, b.ingested_at, b.updated_at) DESC
+            LIMIT ?
+            """,
+            (args.query, args.limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            'SELECT * FROM bookmarks ORDER BY COALESCE(created_at, ingested_at, updated_at) DESC'
+        ).fetchall()
+        if args.group:
+            rows = [r for r in rows if infer_group(r) == args.group][: args.limit]
+        else:
+            rows = rows[: args.limit]
+
+    out = Path(args.output).expanduser() if args.output else EXPORT_DIR / f'{(args.group or args.query or "all")}.json'
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({'items': [row_to_item(r) for r in rows]}, indent=2, ensure_ascii=False) + '\n')
+    print(json.dumps({'output': str(out), 'items': len(rows), 'selector': args.group or args.query or 'all'}, indent=2))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='Magpie local bookmark memory CLI')
     parser.add_argument('--db', default=str(DB_PATH))
@@ -322,6 +356,13 @@ def main() -> None:
     export.add_argument('--limit', type=int, default=25)
     export.add_argument('--output')
     export.set_defaults(func=cmd_export_markdown)
+
+    ejson = sub.add_parser('export-json', help='emit items[] JSON for the Mews shelf generator')
+    ejson.add_argument('--query', help='FTS query; selects by full-text match')
+    ejson.add_argument('--group', help='theme group; selects by classifier')
+    ejson.add_argument('--limit', type=int, default=1000)
+    ejson.add_argument('--output')
+    ejson.set_defaults(func=cmd_export_json)
 
     args = parser.parse_args()
     args.func(args)

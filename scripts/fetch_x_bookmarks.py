@@ -6,6 +6,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 import requests
 
+try:  # optional: only needed for the OAuth 1.0a user-context fallback
+    from requests_oauthlib import OAuth1
+except ImportError:  # pragma: no cover
+    OAuth1 = None
+
 BASE = Path(__file__).resolve().parents[1]
 ENV_PATH = Path(os.environ.get('MAGPIE_ENV_PATH', '')).expanduser() if os.environ.get('MAGPIE_ENV_PATH') else None
 RAW_DIR = BASE / 'data' / 'raw' / 'x'
@@ -80,13 +85,65 @@ def refresh_oauth2(env):
     return env
 
 
+def oauth1_auth(env):
+    if OAuth1 is None:
+        raise RuntimeError('OAuth 1.0a fallback needs requests_oauthlib (pip install -r requirements.txt)')
+    access_token = env.get('X_ACCESS_TOKEN')
+    access_token_secret = env.get('X_ACCESS_TOKEN_SECRET')
+    if not access_token or not access_token_secret:
+        raise RuntimeError('Missing X_ACCESS_TOKEN or X_ACCESS_TOKEN_SECRET for OAuth 1.0a fallback')
+    return OAuth1(env['X_API_KEY'], env['X_API_SECRET'], access_token, access_token_secret)
+
+
+def has_oauth2_refresh(env):
+    return bool(env.get('X_OAUTH2_REFRESH_TOKEN'))
+
+
+def require_x_user_context(env):
+    """Bookmarks need a user context; an app-only bearer token is silently insufficient."""
+    if has_oauth2_refresh(env):
+        return
+    if env.get('X_ACCESS_TOKEN') and env.get('X_ACCESS_TOKEN_SECRET'):
+        return
+    raise RuntimeError(
+        'X bookmark sync needs X_OAUTH2_REFRESH_TOKEN, or X_ACCESS_TOKEN + X_ACCESS_TOKEN_SECRET '
+        'for the OAuth 1.0a fallback. Set them in the environment or in MAGPIE_ENV_PATH.'
+    )
+
+
 def authed_get(path, env, params=None):
     headers = {'Authorization': f"Bearer {env['X_OAUTH2_ACCESS_TOKEN']}"}
     resp = requests.get(f'https://api.x.com{path}', headers=headers, params=params, timeout=30)
+
+    bearer_was_app_only = resp.status_code == 403 and 'OAuth 2.0 Application-Only' in resp.text
+    oauth1_allowed = bool(env.get('X_ACCESS_TOKEN') and env.get('X_ACCESS_TOKEN_SECRET'))
+    bookmarks_endpoint = path.endswith('/bookmarks')
+
+    # The bookmarks endpoint is stricter than ordinary reads: a bearer token reaches the API
+    # but is rejected without user context, so fail with a useful message instead of a 401.
+    if bookmarks_endpoint and not has_oauth2_refresh(env) and resp.status_code in (401, 403):
+        raise RuntimeError(
+            'X bookmarks require OAuth 2.0 User Context, but no X_OAUTH2_REFRESH_TOKEN is '
+            'configured. Reconnect the X integration before rerunning the bookmark sync.'
+        )
+
     if resp.status_code == 401:
-        env = refresh_oauth2(env)
-        headers = {'Authorization': f"Bearer {env['X_OAUTH2_ACCESS_TOKEN']}"}
-        resp = requests.get(f'https://api.x.com{path}', headers=headers, params=params, timeout=30)
+        try:
+            env = refresh_oauth2(env)
+            headers = {'Authorization': f"Bearer {env['X_OAUTH2_ACCESS_TOKEN']}"}
+            resp = requests.get(f'https://api.x.com{path}', headers=headers, params=params, timeout=30)
+        except RuntimeError:
+            if oauth1_allowed:
+                resp = requests.get(f'https://api.x.com{path}', auth=oauth1_auth(env), params=params, timeout=30)
+    elif resp.status_code == 403 and oauth1_allowed and not bookmarks_endpoint:
+        resp = requests.get(f'https://api.x.com{path}', auth=oauth1_auth(env), params=params, timeout=30)
+
+    if bearer_was_app_only and not has_oauth2_refresh(env) and not env.get('X_ACCESS_TOKEN'):
+        raise RuntimeError(
+            'The stored X access token is application-only, and neither X_OAUTH2_REFRESH_TOKEN '
+            'nor X_ACCESS_TOKEN is configured. Bookmarks need a user context.'
+        )
+
     resp.raise_for_status()
     return resp.json(), env
 

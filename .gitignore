@@ -11,7 +11,10 @@ data/index/**
 data/exports/**
 !data/raw/x/.gitkeep
 !data/exports/.gitkeep
+data/normalized/x/bookmarks.jsonl
+data/normalized/x/bookmarks.latest.json
 !data/normalized/x/bookmarks.sample.jsonl
+!data/normalized/x/bookmarks.latest.sample.json
 
 # Local secrets and environment
 .env
