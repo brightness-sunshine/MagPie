@@ -151,9 +151,10 @@ def authed_get(path, env, params=None):
 def fetch_page(env, user_id, pagination_token=None, page_size=100):
     params = {
         'max_results': page_size,
-        'tweet.fields': 'created_at,author_id,public_metrics,entities',
-        'expansions': 'author_id',
-        'user.fields': 'name,username,profile_image_url'
+        'tweet.fields': 'created_at,author_id,public_metrics,entities,attachments',
+        'expansions': 'author_id,attachments.media_keys',
+        'user.fields': 'name,username,profile_image_url',
+        'media.fields': 'type,url,preview_image_url,width,height,alt_text'
     }
     if pagination_token:
         params['pagination_token'] = pagination_token
@@ -162,6 +163,7 @@ def fetch_page(env, user_id, pagination_token=None, page_size=100):
 
 def normalize_items(data, ingested_at, raw_path):
     users = {u['id']: u for u in data.get('includes', {}).get('users', [])}
+    media_by_key = {m['media_key']: m for m in data.get('includes', {}).get('media', []) if m.get('media_key')}
     normalized = []
     for item in data.get('data', []):
         author = users.get(item.get('author_id'), {})
@@ -177,7 +179,24 @@ def normalize_items(data, ingested_at, raw_path):
             'authorName': author.get('name'),
             'title': None,
             'text': item.get('text'),
-            'media': [],
+            'media': [
+                {k: m.get(k) for k in ('type', 'url', 'preview_image_url', 'width', 'height', 'alt_text') if m.get(k) is not None}
+                for key in (item.get('attachments') or {}).get('media_keys', [])
+                if (m := media_by_key.get(key))
+            ],
+            # X already resolves every t.co and ships the link card: keep it.
+            'links': [
+                {
+                    'url': u.get('unwound_url') or u.get('expanded_url'),
+                    'display': u.get('display_url'),
+                    'title': u.get('title'),
+                    'description': u.get('description'),
+                    'image': (u.get('images') or [{}])[0].get('url'),
+                }
+                for u in (item.get('entities') or {}).get('urls', [])
+                if u.get('expanded_url') and '/status/' not in (u.get('expanded_url') or '')
+                   and not (u.get('expanded_url') or '').startswith('https://t.co')
+            ],
             'tags': [],
             'sourceType': 'api',
             'rawRef': str(raw_path),
