@@ -3,11 +3,19 @@ import argparse
 from pathlib import Path
 from collections import defaultdict
 
-LATEST = Path(__file__).resolve().parents[1] / 'data' / 'normalized' / 'x' / 'bookmarks.latest.json'
+NORMALIZED = Path(__file__).resolve().parents[1] / 'data' / 'normalized' / 'x'
+LATEST = NORMALIZED / 'bookmarks.latest.json'
+SAMPLE = NORMALIZED / 'bookmarks.latest.sample.json'
+
+
+def source_path():
+    """A fresh clone has no fetched file — read the tracked sample instead, so
+    every script here runs before any X credentials exist."""
+    return LATEST if LATEST.exists() else SAMPLE
 
 
 def load_items():
-    data = json.loads(LATEST.read_text())
+    data = json.loads(source_path().read_text())
     return data.get('items', []), data.get('user', {})
 
 

@@ -13,6 +13,8 @@ data/exports/**
 !data/exports/.gitkeep
 data/normalized/x/bookmarks.jsonl
 data/normalized/x/bookmarks.latest.json
+# generated from real bookmarks by magpie_digest.py — never commit it
+data/normalized/x/digest.latest.md
 !data/normalized/x/bookmarks.sample.jsonl
 !data/normalized/x/bookmarks.latest.sample.json
 

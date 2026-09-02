@@ -16,15 +16,27 @@ Bring saved links in, keep them local, and make them searchable, explainable, an
 
 ## Install / try locally
 
+The quickstart is stdlib-only — no pip install, no credentials, no account.
+It runs against the bundled sample bookmarks:
+
 ```bash
-git clone <repo-url> magpie-openclaw-skill
-cd magpie-openclaw-skill
+git clone https://github.com/brightness-sunshine/MagPie.git
+cd MagPie
 python3 scripts/magpie.py init-db
 python3 scripts/magpie.py import-jsonl --path data/normalized/x/bookmarks.sample.jsonl
 python3 scripts/magpie.py stats
 python3 scripts/magpie.py search "UFO" --limit 5
 python3 scripts/staged_onboarding.py folder-setup
 ```
+
+To fetch your own bookmarks you need your own X app (`X_CLIENT_ID` / `X_CLIENT_SECRET`,
+scope `bookmark.read`) and `pip install -r requirements.txt`:
+
+```bash
+MAGPIE_ENV_PATH=./magpie-x.env python3 scripts/fetch_x_bookmarks.py --pages 2 --page-size 100
+```
+
+Your fetched bookmarks stay in `data/` and are gitignored. Only the `*.sample.*` files are tracked.
 
 ## Data safety
 
